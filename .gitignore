@@ -1,0 +1,10 @@
+target/
+build/
+dist/
+dist_manylinux/
+*.egg-info/
+__pycache__/
+*.so
+*.csv
+.DS_Store
+*.bak

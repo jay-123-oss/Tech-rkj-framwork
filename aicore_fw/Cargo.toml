@@ -1,0 +1,18 @@
+[package]
+name = "aicore_fw"
+version = "0.1.0"
+edition = "2021"
+description = "Ultra-fast closed-form & sub-10us continual learning subspace engine in Rust"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+rayon = "1.10"
+matrixmultiply = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"

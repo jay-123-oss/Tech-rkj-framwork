@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tech-rkj"
+version = "0.1.0"
+description = "Deterministic AVX2 Closed-Form & Online Continual Learning Subspace Engine in Rust"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [
+    { name = "Jaydeep Prajapati" }
+]
+dependencies = [
+    "numpy>=1.21",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tech_rkj*"]
+
+[tool.setuptools.package-data]
+tech_rkj = ["bin/*.so"]

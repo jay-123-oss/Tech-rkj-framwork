@@ -1,0 +1,16 @@
+[package]
+name = "aicore_capi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "aicore_fw"
+crate-type = ["cdylib"]
+
+[dependencies]
+aicore_fw = { path = "../aicore_fw" }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
