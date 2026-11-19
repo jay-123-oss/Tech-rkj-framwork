@@ -350,8 +350,7 @@ fn test_07_long_horizon_streaming_stability_100k_updates() {
                 );
             }
 
-            for idx in 0..(d_circuits * d_circuits) {
-                let p_val = head.p_inv_f64[idx];
+            for (idx, &p_val) in head.p_inv_f64.iter().enumerate() {
                 assert!(
                     p_val.is_finite(),
                     "Step {}: Covariance P[{}] produced non-finite value: {}",

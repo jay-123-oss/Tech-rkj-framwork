@@ -46,7 +46,7 @@ jobs:
           pip install torch --extra-index-url https://download.pytorch.org/whl/cpu || true
       - name: Build & Install Local Wheel
         run: |
-          maturin develop --release
+          pip install .
       - name: Run Pytest Suite
         run: |
           pytest tests/ -v
