@@ -1,0 +1,15 @@
+[package]
+name = "aicore_pyo3"
+version = "0.2.0"
+edition = "2021"
+
+[lib]
+name = "_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+aicore_fw = { path = "../aicore_fw" }
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py39", "serde"] }
+numpy = "0.22"
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3"

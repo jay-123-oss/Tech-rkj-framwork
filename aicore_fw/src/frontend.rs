@@ -1,6 +1,7 @@
 //! Feature frontends for AICore classifier with supervised ANOVA/Fisher feature weighting.
 
 use std::sync::RwLock;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub trait FeatureFrontend: Send + Sync {
     fn extract(&self, raw: &[f32], out: &mut [f32]);
@@ -9,9 +10,9 @@ pub trait FeatureFrontend: Send + Sync {
     fn fit_stats_regression(&self, _x_batch: &[f32], _y_targets: &[f64]) {}
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdentityFrontend {
-    dim: usize,
+    pub dim: usize,
 }
 
 impl IdentityFrontend {
@@ -31,18 +32,41 @@ impl FeatureFrontend for IdentityFrontend {
     }
 }
 
-#[derive(Debug)]
-struct ZScoreStats {
-    mean: Vec<f32>,
-    std: Vec<f32>,
-    feature_weights: Vec<f32>,
-    fitted: bool,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZScoreStats {
+    pub mean: Vec<f32>,
+    pub std: Vec<f32>,
+    pub feature_weights: Vec<f32>,
+    pub fitted: bool,
 }
 
 #[derive(Debug)]
 pub struct OnlineZScoreFrontend {
-    dim: usize,
-    stats: RwLock<ZScoreStats>,
+    pub dim: usize,
+    pub stats: RwLock<ZScoreStats>,
+}
+
+impl Serialize for OnlineZScoreFrontend {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let stats = self.stats.read().unwrap();
+        (self.dim, &*stats).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for OnlineZScoreFrontend {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let (dim, stats): (usize, ZScoreStats) = Deserialize::deserialize(deserializer)?;
+        Ok(Self {
+            dim,
+            stats: RwLock::new(stats),
+        })
+    }
 }
 
 impl OnlineZScoreFrontend {
@@ -74,8 +98,8 @@ impl OnlineZScoreFrontend {
                 mean[j] += row[j];
             }
         }
-        for j in 0..dim {
-            mean[j] /= n_f;
+        for val in mean.iter_mut().take(dim) {
+            *val /= n_f;
         }
 
         // 2. Global per-feature std: sigma = (var + 1e-6).sqrt()
@@ -87,9 +111,9 @@ impl OnlineZScoreFrontend {
                 std[j] += diff * diff;
             }
         }
-        for j in 0..dim {
-            let var = std[j] / n_f;
-            std[j] = (var + 1e-6).sqrt();
+        for val in std.iter_mut().take(dim) {
+            let var = *val / n_f;
+            *val = (var + 1e-6).sqrt();
         }
 
         // 3. Supervised ANOVA F-statistic feature weighting
@@ -115,8 +139,7 @@ impl OnlineZScoreFrontend {
 
             // Per-class means mu_c[c][j]
             let mut mu_c = vec![0.0f64; c * dim];
-            for cl in 0..c {
-                let cnt = n_c[cl];
+            for (cl, &cnt) in n_c.iter().enumerate().take(c) {
                 if cnt > 0 {
                     let inv_cnt = 1.0 / (cnt as f64);
                     let c_off = cl * dim;
@@ -129,8 +152,8 @@ impl OnlineZScoreFrontend {
             // Between-class MSB = sum_c n_c * (mu_c,j)^2 / (C - 1)
             let df_b = (c - 1) as f64;
             let mut msb = vec![0.0f64; dim];
-            for cl in 0..c {
-                let cnt = n_c[cl] as f64;
+            for (cl, &cnt_u) in n_c.iter().enumerate().take(c) {
+                let cnt = cnt_u as f64;
                 if cnt > 0.0 {
                     let c_off = cl * dim;
                     for j in 0..dim {
@@ -139,8 +162,8 @@ impl OnlineZScoreFrontend {
                     }
                 }
             }
-            for j in 0..dim {
-                msb[j] /= df_b;
+            for val in msb.iter_mut().take(dim) {
+                *val /= df_b;
             }
 
             // Within-class SSW = sum_n (z_nj - mu_{y_n, j})^2
@@ -212,8 +235,8 @@ impl OnlineZScoreFrontend {
                 mean[j] += row[j];
             }
         }
-        for j in 0..dim {
-            mean[j] /= n_f;
+        for val in mean.iter_mut().take(dim) {
+            *val /= n_f;
         }
 
         // 2. Global per-feature std: sigma = (var + 1e-6).sqrt()
@@ -225,9 +248,9 @@ impl OnlineZScoreFrontend {
                 std[j] += diff * diff;
             }
         }
-        for j in 0..dim {
-            let var = std[j] / n_f;
-            std[j] = (var + 1e-6).sqrt();
+        for val in std.iter_mut().take(dim) {
+            let var = *val / n_f;
+            *val = (var + 1e-6).sqrt();
         }
 
         // 3. Target stats: y_mean and y_std
@@ -318,9 +341,9 @@ impl FeatureFrontend for OnlineZScoreFrontend {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VisionGaborFrontend {
-    output_dim: usize,
+    pub output_dim: usize,
 }
 
 impl VisionGaborFrontend {

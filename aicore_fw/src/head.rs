@@ -1,8 +1,8 @@
-//! Subspace head implementation for AICore classifier.
+//! Subspace head implementation for AICore classifier and regressor.
 
-use crate::math_avx2::simd_dot_f32;
-#[cfg(target_arch = "x86_64")]
-use std::arch::x86_64::*;
+use crate::simd::{
+    simd_dot_f32, simd_dot_f64, simd_matvec_f64, simd_rls_rank1_update, stabilize_covariance,
+};
 
 struct SplitMix64 {
     state: u64,
@@ -34,7 +34,9 @@ impl SplitMix64 {
     }
 }
 
-#[derive(Debug, Clone)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubspaceHead {
     pub proj_f32: Vec<f32>,
     pub bias_f32: Vec<f32>,
@@ -76,8 +78,8 @@ impl SubspaceHead {
 
         let mut bias_f32 = vec![0.0f32; d];
         let two_pi = 2.0 * std::f64::consts::PI;
-        for i in 0..d {
-            bias_f32[i] = (rng.next_uniform() * two_pi) as f32;
+        for b in bias_f32.iter_mut().take(d) {
+            *b = (rng.next_uniform() * two_pi) as f32;
         }
 
         let mut p_inv_f64 = vec![0.0f64; p_inv_size];
@@ -105,10 +107,10 @@ impl SubspaceHead {
 
     #[inline(always)]
     pub fn project_one(&self, x: &[f32], out_z: &mut [f64]) {
-        for i in 0..self.d_circuits {
+        for (i, out_elem) in out_z.iter_mut().enumerate().take(self.d_circuits) {
             let row = &self.proj_f32[i * self.d_in..(i + 1) * self.d_in];
             let dot = simd_dot_f32(row, x);
-            out_z[i] = ((dot + self.bias_f32[i]) as f64).cos();
+            *out_elem = ((dot + self.bias_f32[i]) as f64).cos();
         }
     }
 
@@ -125,12 +127,12 @@ impl SubspaceHead {
     pub fn compute_logits(&self, z: &[f64], scores: &mut [f64]) {
         let d = self.d_circuits;
         let c = self.num_classes;
-        for cl in 0..c {
+        for (cl, score) in scores.iter_mut().enumerate().take(c) {
             let mut sum = 0.0f64;
-            for i in 0..d {
-                sum += self.w_f64[i * c + cl] * z[i];
+            for (i, &z_i) in z.iter().enumerate().take(d) {
+                sum += self.w_f64[i * c + cl] * z_i;
             }
-            scores[cl] += sum;
+            *score += sum;
         }
     }
 
@@ -143,8 +145,8 @@ impl SubspaceHead {
     pub fn compute_scalar(&self, z: &[f64]) -> f64 {
         let d = self.d_circuits;
         let mut sum = 0.0f64;
-        for i in 0..d {
-            sum += self.w_f64[i] * z[i];
+        for (i, &z_i) in z.iter().enumerate().take(d) {
+            sum += self.w_f64[i] * z_i;
         }
         sum
     }
@@ -236,9 +238,7 @@ impl SubspaceHead {
 
             if pivot_row != col {
                 for k in 0..m {
-                    let tmp = aug[col * m + k];
-                    aug[col * m + k] = aug[pivot_row * m + k];
-                    aug[pivot_row * m + k] = tmp;
+                    aug.swap(col * m + k, pivot_row * m + k);
                 }
             }
 
@@ -273,6 +273,9 @@ impl SubspaceHead {
                 self.w_f64[i * c + cl] = aug[row_off + 2 * d + cl];
             }
         }
+
+        // Enforce numerical stability on closed-form P_inv
+        stabilize_covariance(&mut self.p_inv_f64, d, 1e-12);
     }
 
     pub fn fit_closed_form_regression(
@@ -315,7 +318,7 @@ impl SubspaceHead {
             let val = y_norm[s] * inv_h;
             let z_s = &z_batch[s * d..(s + 1) * d];
             for i in 0..d {
-                b[i * c + 0] += z_s[i] * val;
+                b[i * c] += z_s[i] * val;
             }
         }
 
@@ -347,9 +350,7 @@ impl SubspaceHead {
 
             if pivot_row != col {
                 for k in 0..m {
-                    let tmp = aug[col * m + k];
-                    aug[col * m + k] = aug[pivot_row * m + k];
-                    aug[pivot_row * m + k] = tmp;
+                    aug.swap(col * m + k, pivot_row * m + k);
                 }
             }
 
@@ -384,6 +385,9 @@ impl SubspaceHead {
                 self.w_f64[i * c + cl] = aug[row_off + 2 * d + cl];
             }
         }
+
+        // Enforce numerical stability on closed-form P_inv
+        stabilize_covariance(&mut self.p_inv_f64, d, 1e-12);
     }
 
     #[inline(always)]
@@ -395,123 +399,34 @@ impl SubspaceHead {
         let d = self.d_circuits;
         let c = self.num_classes;
 
-        #[cfg(target_arch = "x86_64")]
-        unsafe {
-            if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") && d % 16 == 0 {
-                let p_ptr = self.p_inv_f64.as_mut_ptr();
-                let z_ptr = self.z_f64.as_ptr();
-                let k_ptr = self.k_f64.as_mut_ptr();
-                let w_ptr = self.w_f64.as_mut_ptr();
-                let res_ptr = residual.as_ptr();
+        // 1. Matrix-vector multiplication: k = P * z (SIMD accelerated across AVX2/NEON/Scalar)
+        simd_matvec_f64(&self.p_inv_f64, &self.z_f64, &mut self.k_f64, d);
 
-                let mut z_dot_k = 0.0f64;
-                for i in 0..d {
-                    let row_ptr = p_ptr.add(i * d);
-                    let mut acc0 = _mm256_setzero_pd();
-                    let mut acc1 = _mm256_setzero_pd();
-                    let mut acc2 = _mm256_setzero_pd();
-                    let mut acc3 = _mm256_setzero_pd();
+        // 2. Inner product: z^T * k (guaranteed non-negative)
+        let z_dot_k = simd_dot_f64(&self.z_f64, &self.k_f64).max(0.0);
 
-                    let mut j = 0;
-                    while j < d {
-                        acc0 = _mm256_fmadd_pd(_mm256_loadu_pd(row_ptr.add(j)), _mm256_loadu_pd(z_ptr.add(j)), acc0);
-                        acc1 = _mm256_fmadd_pd(_mm256_loadu_pd(row_ptr.add(j + 4)), _mm256_loadu_pd(z_ptr.add(j + 4)), acc1);
-                        acc2 = _mm256_fmadd_pd(_mm256_loadu_pd(row_ptr.add(j + 8)), _mm256_loadu_pd(z_ptr.add(j + 8)), acc2);
-                        acc3 = _mm256_fmadd_pd(_mm256_loadu_pd(row_ptr.add(j + 12)), _mm256_loadu_pd(z_ptr.add(j + 12)), acc3);
-                        j += 16;
-                    }
-
-                    let acc = _mm256_add_pd(_mm256_add_pd(acc0, acc1), _mm256_add_pd(acc2, acc3));
-                    let hi = _mm256_extractf128_pd(acc, 1);
-                    let lo = _mm256_castpd256_pd128(acc);
-                    let sum128 = _mm_add_pd(lo, hi);
-                    let sum_hi = _mm_unpackhi_pd(sum128, sum128);
-                    let row_sum = _mm_cvtsd_f64(_mm_add_sd(sum128, sum_hi));
-
-                    *k_ptr.add(i) = row_sum;
-                    z_dot_k += *z_ptr.add(i) * row_sum;
-                }
-
-                let w_eff = sample_weight.max(1e-6);
-                let base_gamma = 1.0 / ((1.0 / w_eff) + z_dot_k.max(0.0));
-                // Few-shot novelty floor when user explicitly flags high-priority/rare sample (sample_weight > 2.0)
-                let gamma = if sample_weight > 2.0 {
-                    base_gamma.max(0.06 * (sample_weight / 5.0).min(2.0))
-                } else {
-                    base_gamma
-                };
-
-                for i in 0..d {
-                    let g_ki = _mm256_set1_pd(gamma * *k_ptr.add(i));
-                    let row_ptr = p_ptr.add(i * d);
-
-                    let mut j = 0;
-                    while j < d {
-                        let p0 = _mm256_loadu_pd(row_ptr.add(j));
-                        let k0 = _mm256_loadu_pd(k_ptr.add(j));
-                        _mm256_storeu_pd(row_ptr.add(j), _mm256_fnmadd_pd(g_ki, k0, p0));
-
-                        let p1 = _mm256_loadu_pd(row_ptr.add(j + 4));
-                        let k1 = _mm256_loadu_pd(k_ptr.add(j + 4));
-                        _mm256_storeu_pd(row_ptr.add(j + 4), _mm256_fnmadd_pd(g_ki, k1, p1));
-
-                        let p2 = _mm256_loadu_pd(row_ptr.add(j + 8));
-                        let k2 = _mm256_loadu_pd(k_ptr.add(j + 8));
-                        _mm256_storeu_pd(row_ptr.add(j + 8), _mm256_fnmadd_pd(g_ki, k2, p2));
-
-                        let p3 = _mm256_loadu_pd(row_ptr.add(j + 12));
-                        let k3 = _mm256_loadu_pd(k_ptr.add(j + 12));
-                        _mm256_storeu_pd(row_ptr.add(j + 12), _mm256_fnmadd_pd(g_ki, k3, p3));
-
-                        j += 16;
-                    }
-                }
-
-                for i in 0..d {
-                    let g_ki = gamma * *k_ptr.add(i);
-                    let w_row = w_ptr.add(i * c);
-                    for cl in 0..c {
-                        *w_row.add(cl) += g_ki * *res_ptr.add(cl);
-                    }
-                }
-                return;
-            }
-        }
-
-        // Fallback
-        let mut z_dot_k = 0.0f64;
-        for i in 0..d {
-            let row = &self.p_inv_f64[i * d..(i + 1) * d];
-            let mut sum = 0.0f64;
-            for j in 0..d {
-                sum += row[j] * self.z_f64[j];
-            }
-            self.k_f64[i] = sum;
-            z_dot_k += self.z_f64[i] * sum;
-        }
-
+        // 3. Robust learning gain calculation with denominator safeguard
         let w_eff = sample_weight.max(1e-6);
-        let base_gamma = 1.0 / ((1.0 / w_eff) + z_dot_k.max(0.0));
-        // Few-shot novelty floor when user explicitly flags high-priority/rare sample (sample_weight > 2.0)
+        let denom = ((1.0 / w_eff) + z_dot_k).max(1e-12);
+        let base_gamma = 1.0 / denom;
         let gamma = if sample_weight > 2.0 {
             base_gamma.max(0.06 * (sample_weight / 5.0).min(2.0))
         } else {
             base_gamma
         };
 
-        for i in 0..d {
-            let g_ki = gamma * self.k_f64[i];
-            let row = &mut self.p_inv_f64[i * d..(i + 1) * d];
-            for j in 0..d {
-                row[j] -= g_ki * self.k_f64[j];
-            }
-        }
+        // 4. Vectorized rank-1 covariance update: P <- P - gamma * (k * k^T)
+        simd_rls_rank1_update(&mut self.p_inv_f64, &self.k_f64, gamma, d);
 
+        // 5. Numerical hardening: enforce symmetry and diagonal positivity
+        stabilize_covariance(&mut self.p_inv_f64, d, 1e-12);
+
+        // 6. Weight update: W <- W + gamma * (k * residual^T)
         for i in 0..d {
             let g_ki = gamma * self.k_f64[i];
             let w_row = &mut self.w_f64[i * c..(i + 1) * c];
-            for cl in 0..c {
-                w_row[cl] += g_ki * residual[cl];
+            for (cl, &res_val) in residual.iter().enumerate().take(c) {
+                w_row[cl] += g_ki * res_val;
             }
         }
     }

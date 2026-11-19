@@ -3,8 +3,9 @@
 use crate::frontend::FeatureFrontend;
 use crate::head::SubspaceHead;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AICoreConfig {
     pub input_dim: usize,
     pub num_heads: usize,
@@ -32,7 +33,7 @@ impl std::fmt::Display for AICoreError {
 
 impl std::error::Error for AICoreError {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiHeadSubspaceEngine {
     pub heads: Vec<SubspaceHead>,
     pub input_dim: usize,

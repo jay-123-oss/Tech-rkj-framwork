@@ -1,15 +1,24 @@
 """
-tech-rkj: High-Performance AVX2 Closed-Form & Continual Learning Subspace Engine in Rust.
+tech-rkj: High-Performance AVX2/NEON Closed-Form & Continual Learning Subspace Framework.
 """
 
 from .classifier import SubspaceClassifier, AICoreClassifier
 from .regressor import SubspaceRegressor, AICoreRegressor
+from .persistence import save, load
 
-__version__ = "0.1.0"
+try:
+    from .torch import TorchSubspaceHead
+except ImportError:
+    TorchSubspaceHead = None  # type: ignore
+
+__version__ = "0.2.0"
 __all__ = [
     "SubspaceClassifier",
     "AICoreClassifier",
     "SubspaceRegressor",
     "AICoreRegressor",
+    "TorchSubspaceHead",
+    "save",
+    "load",
     "__version__",
 ]

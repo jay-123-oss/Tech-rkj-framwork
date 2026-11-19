@@ -1,33 +1,72 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "tech-rkj"
-version = "0.1.0"
-description = "Deterministic AVX2 Closed-Form & Online Continual Learning Subspace Engine in Rust"
+version = "0.2.0"
+description = "Production-grade, cross-platform deterministic ML + Continual Learning framework in Rust & Python"
 readme = "README.md"
 requires-python = ">=3.9"
-license = "MIT"
+license = { text = "MIT" }
 authors = [
     { name = "Jaydeep Prajapati" }
 ]
+keywords = [
+    "machine-learning",
+    "continual-learning",
+    "online-learning",
+    "subspace",
+    "avx2",
+    "neon",
+    "simd",
+    "rust",
+    "scikit-learn",
+    "pytorch"
+]
 dependencies = [
     "numpy>=1.21",
+    "scikit-learn>=1.0",
+    "joblib>=1.1",
 ]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
     "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["tech_rkj*"]
+[project.optional-dependencies]
+torch = ["torch>=2.0"]
+test = [
+    "pytest>=7.0",
+    "torch>=2.0",
+]
+all = [
+    "torch>=2.0",
+    "pytest>=7.0",
+]
 
-[tool.setuptools.package-data]
-tech_rkj = ["bin/*.so"]
+[project.urls]
+Homepage = "https://github.com/jay-123-oss/Tech-rkj-framwork"
+Repository = "https://github.com/jay-123-oss/Tech-rkj-framwork"
+Issues = "https://github.com/jay-123-oss/Tech-rkj-framwork/issues"
+
+[tool.maturin]
+manifest-path = "aicore_pyo3/Cargo.toml"
+module-name = "tech_rkj._core"
+python-source = "."
+features = ["pyo3/extension-module"]
+strip = true

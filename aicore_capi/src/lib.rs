@@ -1,3 +1,5 @@
+#![allow(clippy::missing_safety_doc)]
+
 use aicore_fw::frontend::FeatureFrontend;
 use aicore_fw::frontend::IdentityFrontend;
 use aicore_fw::frontend::OnlineZScoreFrontend;
