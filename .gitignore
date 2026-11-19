@@ -2,6 +2,7 @@ target/
 build/
 dist/
 dist_manylinux/
+dist_release/
 *.egg-info/
 __pycache__/
 *.so
